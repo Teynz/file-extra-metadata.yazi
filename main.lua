@@ -51,6 +51,11 @@ local function checksum_target(file, forced)
 	if file.url.spec and file.url.spec.is_virtual then
 		return nil, "skipped (virtual)"
 	end
+	-- FIFOs/sockets/devices: reading may block forever or never end, even when forced
+	local c = file.cha
+	if c.is_fifo or c.is_sock or c.is_char or c.is_block then
+		return nil, "skipped (not a regular file)"
+	end
 	local path = tostring(file.url)
 	local size = ya.readable_size(file.cha.len or 0)
 	local remote = false
@@ -194,7 +199,7 @@ local function get_filesystem_extra(file)
 
 	local alter_df_command = get_state(STATE_KEY.ALTER_DF_COMMAND)
 	if not alter_df_command then
-		child, _ = Command("df"):arg({ "-P", "-T", "-h", tostring(file_url) }):stdout(Command.PIPED):spawn()
+		child, _ = Command("df"):arg({ "-P", "-T", "-h", "--", tostring(file_url) }):stdout(Command.PIPED):spawn()
 
 		if child then
 			-- Ignore header
@@ -211,7 +216,7 @@ local function get_filesystem_extra(file)
 		if not alter_df_command then
 			set_state(STATE_KEY.ALTER_DF_COMMAND, true)
 		end
-		child, _ = Command("df"):arg({ "-P", "-h", tostring(file_url) }):stdout(Command.PIPED):spawn()
+		child, _ = Command("df"):arg({ "-P", "-h", "--", tostring(file_url) }):stdout(Command.PIPED):spawn()
 		if child then
 			local _, event = child:read_line() -- skip header
 			if event == 0 then
@@ -292,7 +297,7 @@ local function attributes(file)
 		return ""
 	end
 
-	local output, _ = Command("lsattr"):arg({ "-d", tostring(file_url) }):stdout(Command.PIPED):output()
+	local output, _ = Command("lsattr"):arg({ "-d", "--", tostring(file_url) }):stdout(Command.PIPED):output()
 
 	if output then
 		-- Splitting the data
