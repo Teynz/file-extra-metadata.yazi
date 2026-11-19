@@ -1,3 +1,11 @@
+> [!NOTE]
+> **AI-generated fork** of
+> [boydaihungst/file-extra-metadata.yazi](https://github.com/boydaihungst/file-extra-metadata.yazi)
+> (upstream is deprecated). Changes in this fork were written by an AI assistant (Claude):
+> the spotter (`<Tab>`) additionally shows SHA-256 and BLAKE3 (`b3sum`) checksums.
+> Files > 512 MiB, virtual files and paths in `CHECKSUM_SKIP` are not hashed.
+> The previewer is unchanged (no hashing on hover). Tested target: Yazi 26.9.1.
+
 # file-extra-metadata
 
 > [!IMPORTANT]

@@ -14,6 +14,49 @@ local get_state = ya.sync(function(state, key)
 	return state[key]
 end)
 
+-- Checksums (spotter only). AI-generated addition, see README.
+local CHECKSUM_ALGOS = {
+	{ "SHA-256:", "sha256sum" },
+	{ "BLAKE3:", "b3sum" },
+}
+local CHECKSUM_MAX = 512 * 1024 * 1024
+local CHECKSUM_SKIP = { "/home/paul/GoogleDrive/", "/home/paul/RCDM/" }
+
+local function checksum(cmd, path)
+	local out, err = Command(cmd)
+		:arg({ "--", path })
+		:stdout(Command.PIPED)
+		:stderr(Command.NULL)
+		:output()
+	if not out then
+		local e = tostring(err)
+		return e:find("No such file") and "not installed" or ("error: " .. e)
+	end
+	if not out.status.success then
+		return "error"
+	end
+	return out.stdout:match("^(%x+)") or "-"
+end
+
+local function checksum_skip_reason(file)
+	if file.cha.is_dir then
+		return "directory"
+	end
+	if file.url.spec and file.url.spec.is_virtual then
+		return "skipped (virtual)"
+	end
+	local path = tostring(file.url)
+	for _, p in ipairs(CHECKSUM_SKIP) do
+		if path:sub(1, #p) == p then
+			return "skipped (remote mount)"
+		end
+	end
+	if (file.cha.len or 0) > CHECKSUM_MAX then
+		return string.format("skipped (> %d MiB)", CHECKSUM_MAX // 1048576)
+	end
+	return nil
+end
+
 local function permission(file)
 	local h = file
 	if not h then
@@ -319,6 +362,13 @@ function M:render_table(job, opts)
 				or ""
 			)
 	)
+	if opts and opts.show_checksums and not job.file.cha.is_dir then
+		rows[#rows + 1] = ui.Row({ { "", "Checksums" }, "" }):height(2):style(styles.header)
+		local reason = checksum_skip_reason(job.file)
+		for _, a in ipairs(CHECKSUM_ALGOS) do
+			row(prefix .. a[1], reason or checksum(a[2], tostring(job.file.url)))
+		end
+	end
 	if opts and opts.show_plugins_section then
 		-- TODO: Remove this after the next release
 		local spotter, previewer, fetchers, preloaders = nil, nil, {}, {}
@@ -403,10 +453,10 @@ function M:preload(job)
 end
 
 function M:spot(job)
-	job.area = ui.Pos({ "center", w = 80, h = 25 })
+	job.area = ui.Pos({ "center", w = 84, h = 30 })
 	ya.spot_table(
 		job,
-		self:render_table(job, { show_plugins_section = true })
+		self:render_table(job, { show_plugins_section = true, show_checksums = true })
 			:cell_style(th.spot.tbl_cell or ui.Style():fg("blue"):reverse())
 	)
 end
