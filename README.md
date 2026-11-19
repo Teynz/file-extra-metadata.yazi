@@ -3,7 +3,10 @@
 > [boydaihungst/file-extra-metadata.yazi](https://github.com/boydaihungst/file-extra-metadata.yazi)
 > (upstream is deprecated). Changes in this fork were written by an AI assistant (Claude):
 > the spotter (`<Tab>`) additionally shows SHA-256 and BLAKE3 (`b3sum`) checksums.
-> Files > 512 MiB, virtual files and paths in `CHECKSUM_SKIP` are not hashed.
+> Files > 512 MiB and remote files are not hashed automatically; `<Enter>` in the spotter
+> forces it (asks for confirmation > 512 MiB). Merged mounts (`CHECKSUM_MERGED`) hash the
+> local branch copy if it exists. Keymap: `[[spot.prepend_keymap]]`
+> `on = "<Enter>", run = "plugin file-extra-metadata -- force"`.
 > The previewer is unchanged (no hashing on hover). Tested target: Yazi 26.9.1.
 
 # file-extra-metadata

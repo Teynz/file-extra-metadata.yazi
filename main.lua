@@ -15,12 +15,16 @@ local get_state = ya.sync(function(state, key)
 end)
 
 -- Checksums (spotter only). AI-generated addition, see README.
+-- <Enter> in the spotter forces hashing (confirm if > CHECKSUM_MAX).
 local CHECKSUM_ALGOS = {
 	{ "SHA-256:", "sha256sum" },
 	{ "BLAKE3:", "b3sum" },
 }
 local CHECKSUM_MAX = 512 * 1024 * 1024
-local CHECKSUM_SKIP = { "/home/paul/GoogleDrive/", "/home/paul/RCDM/" }
+-- merged mount prefix -> local branch prefix (file exists there = local, hash it)
+local CHECKSUM_MERGED = { { "/home/paul/RCDM/", "/home/paul/RCDM_bisync/" } }
+-- pure remote mounts: never hashed unless forced
+local CHECKSUM_SKIP = { "/home/paul/GoogleDrive/" }
 
 local function checksum(cmd, path)
 	local out, err = Command(cmd)
@@ -38,24 +42,53 @@ local function checksum(cmd, path)
 	return out.stdout:match("^(%x+)") or "-"
 end
 
-local function checksum_skip_reason(file)
-	if file.cha.is_dir then
-		return "directory"
-	end
+local function starts(s, p)
+	return s:sub(1, #p) == p
+end
+
+--- Returns the path to hash, or nil + reason
+local function checksum_target(file, forced)
 	if file.url.spec and file.url.spec.is_virtual then
-		return "skipped (virtual)"
+		return nil, "skipped (virtual)"
 	end
 	local path = tostring(file.url)
-	for _, p in ipairs(CHECKSUM_SKIP) do
-		if path:sub(1, #p) == p then
-			return "skipped (remote mount)"
+	local size = ya.readable_size(file.cha.len or 0)
+	local remote = false
+	for _, m in ipairs(CHECKSUM_MERGED) do
+		if starts(path, m[1]) then
+			local real = m[2] .. path:sub(#m[1] + 1)
+			if fs.cha(Url(real)) then
+				path = real
+			else
+				remote = true
+			end
+			break
 		end
 	end
-	if (file.cha.len or 0) > CHECKSUM_MAX then
-		return string.format("skipped (> %d MiB)", CHECKSUM_MAX // 1048576)
+	for _, p in ipairs(CHECKSUM_SKIP) do
+		if starts(path, p) then
+			remote = true
+		end
 	end
-	return nil
+	if forced then
+		return path
+	end
+	if remote then
+		return nil, "skipped (remote, " .. size .. ") - <Enter> to force"
+	end
+	if (file.cha.len or 0) > CHECKSUM_MAX then
+		return nil, "skipped (" .. size .. ") - <Enter> to force"
+	end
+	return path
 end
+
+local hovered_info = ya.sync(function()
+	local h = cx.active.current.hovered
+	if not h then
+		return nil
+	end
+	return tostring(h.url), h.cha.len or 0, h.cha.is_dir
+end)
 
 local function permission(file)
 	local h = file
@@ -364,9 +397,14 @@ function M:render_table(job, opts)
 	)
 	if opts and opts.show_checksums and not job.file.cha.is_dir then
 		rows[#rows + 1] = ui.Row({ { "", "Checksums" }, "" }):height(2):style(styles.header)
-		local reason = checksum_skip_reason(job.file)
+		local url = tostring(job.file.url)
+		local forced = get_state("FORCE_CHECKSUM") == url
+		if forced then
+			set_state("FORCE_CHECKSUM", nil)
+		end
+		local target, reason = checksum_target(job.file, forced)
 		for _, a in ipairs(CHECKSUM_ALGOS) do
-			row(prefix .. a[1], reason or checksum(a[2], tostring(job.file.url)))
+			row(prefix .. a[1], reason or checksum(a[2], target))
 		end
 	end
 	if opts and opts.show_plugins_section then
@@ -459,6 +497,33 @@ function M:spot(job)
 		self:render_table(job, { show_plugins_section = true, show_checksums = true })
 			:cell_style(th.spot.tbl_cell or ui.Style():fg("blue"):reverse())
 	)
+end
+
+--- `plugin file-extra-metadata -- force` (bound to <Enter> in [spot])
+function M:entry(job)
+	if job.args[1] ~= "force" then
+		return
+	end
+	local url, len, is_dir = hovered_info()
+	if not url or is_dir then
+		return
+	end
+	if len > CHECKSUM_MAX then
+		local ok = ya.confirm({
+			pos = { "center", w = 60, h = 10 },
+			title = ui.Line("Compute checksums?"):style(th.confirm.title),
+			body = ui.Text(string.format(
+				"File size: %s (limit %s).\nRemote files will be downloaded.",
+				ya.readable_size(len),
+				ya.readable_size(CHECKSUM_MAX)
+			)),
+		})
+		if not ok then
+			return
+		end
+	end
+	set_state("FORCE_CHECKSUM", url)
+	ya.emit("spot", { force = true })
 end
 
 return M
